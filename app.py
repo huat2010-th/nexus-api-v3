@@ -8,13 +8,16 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. V6.0 (TRUE PYTHON PARITY)."
+    return "NEXUS BRAIN IS ONLINE. V6.1 (ORGANIC GROWTH ENGINE)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
     incoming_data = request.json
     sim_method = incoming_data.get('method', 'A')
     
+    # ==========================================
+    # METHOD A: TIME-SERIES COMPONENT MATH
+    # ==========================================
     if sim_method == 'A':
         h_sh, h_tl, h_ms, h_ln = float(incoming_data.get('h_shower', 120)), float(incoming_data.get('h_toilet', 45)), float(incoming_data.get('h_misc', 40)), float(incoming_data.get('h_laundry', 60))
         h_ml, h_wm = float(incoming_data.get('h_meals', 2.5)), float(incoming_data.get('h_water_meal', 25))
@@ -66,7 +69,7 @@ def simulate():
             avg_m3 = ((s_dom_av + s_fnb_av + s_stf + s_irr + s_pol) * g_fac * n_fac) / 1000
             peak_m3 = ((((s_dom_pk + s_fnb_pk)*pk_occ) + s_stf + s_pol + (s_irr*irr_mult)) * g_fac * n_fac) / 1000
             
-            chart_consumption.append({"year": str(y), "Average": round(avg_m3,0), "Peak": round(peak_m3,0)})
+            chart_consumption.append({"year": str(y), "Average": round(avg_m3,0), "Peak (Jan)": round(peak_m3,0)})
             
             bd_factor = (g_fac * n_fac) / 1000
             table_a_results.append({
@@ -85,6 +88,9 @@ def simulate():
 
         return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data, "table_a_results": table_a_results})
 
+    # ==========================================
+    # METHOD B: DYNAMIC INFERENCE + ORGANIC GROWTH
+    # ==========================================
     elif sim_method == 'B':
         w_weights = {
             '1-Bed': float(incoming_data.get('w_1bed', 1.0)), '2-Bed': float(incoming_data.get('w_2bed', 1.5)),
@@ -93,8 +99,14 @@ def simulate():
             'Pr Pool': float(incoming_data.get('w_pr_pool', 3.0))
         }
         
+        b_growth_rate = float(incoming_data.get('b_growth_rate', 1.5)) / 100.0
+        
         matrix_baseline = incoming_data.get('matrix_b_baseline', [])
         matrix_future = incoming_data.get('matrix_b_future', [])
+        
+        # Calculate Total Baseline Volume (Before new projects)
+        base_total_av = sum(float(b.get("Ann", 0)) for b in matrix_baseline) / 365 if matrix_baseline else 0
+        base_total_pk = sum(float(b.get("Pk", 0)) for b in matrix_baseline) / 31 if matrix_baseline else 0
         
         def get_rates(b_type):
             av, pk = [], []
@@ -120,8 +132,8 @@ def simulate():
             p_pk = eq * (c_pk if p.get('Type')=="Condo" else v_pk)
             
             y = int(p.get('Year', 2026))
-            if y not in y_data: y_data[y] = {"av": 0, "pk": 0, "c_av": 0, "v_av": 0}
-            y_data[y]["av"] += p_av; y_data[y]["pk"] += p_pk
+            if y not in y_data: y_data[y] = {"new_av": 0, "new_pk": 0, "c_av": 0, "v_av": 0}
+            y_data[y]["new_av"] += p_av; y_data[y]["new_pk"] += p_pk
             if p.get('Type') == 'Condo': y_data[y]["c_av"] += p_av 
             else: y_data[y]["v_av"] += p_av
             
@@ -131,15 +143,51 @@ def simulate():
                 "Peak Daily (m3/d)": round(p_pk, 1), "Ann Total (m3/y)": round(p_av*365, 0)
             })
                 
-        cum_chart, type_chart, table_cum = [], [], []
-        cum_av, cum_pk = 0, 0
-        for y in sorted(y_data.keys()):
-            cum_av += y_data[y]["av"]; cum_pk += y_data[y]["pk"]
-            cum_chart.append({"year": str(y), "New Avg": int(cum_av), "New Peak": int(cum_pk)})
-            type_chart.append({"year": str(y), "Condo": int(y_data[y]["c_av"]), "Villa": int(y_data[y]["v_av"])})
-            table_cum.append({"Year": y, "Cum. Avg Daily (m3/d)": round(cum_av, 1), "Cum. Peak Daily (m3/d)": round(cum_pk, 1)})
+        # Combine Baseline Organic Growth + Cumulative New Projects
+        years = [int(p.get('Year', 2026)) for p in matrix_future]
+        start_y = min(years) if years else 2026
+        end_y = max(years) if years else 2050
+        if end_y < 2050: end_y = 2050 
 
-        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(cum_pk, 0), "avg_daily": round(cum_av, 0), "annual_demand": round(cum_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart, "table_b_individual": indiv_proj, "table_b_cum": table_cum})
+        cum_chart, type_chart, table_cum = [], [], []
+        cum_new_av, cum_new_pk = 0, 0
+        final_av, final_pk = 0, 0
+        
+        for y in range(start_y, end_y + 1):
+            if y in y_data:
+                cum_new_av += y_data[y]["new_av"]
+                cum_new_pk += y_data[y]["new_pk"]
+                type_chart.append({"year": str(y), "Condo": int(y_data[y]["c_av"]), "Villa": int(y_data[y]["v_av"])})
+            else:
+                type_chart.append({"year": str(y), "Condo": 0, "Villa": 0})
+            
+            # Organic Growth applied to Baseline properties
+            grown_base_av = base_total_av * ((1 + b_growth_rate) ** (y - start_y))
+            grown_base_pk = base_total_pk * ((1 + b_growth_rate) ** (y - start_y))
+            
+            total_av = grown_base_av + cum_new_av
+            total_pk = grown_base_pk + cum_new_pk
+            
+            cum_chart.append({
+                "year": str(y), 
+                "Baseline (Organic)": int(grown_base_av),
+                "New Projects": int(cum_new_av),
+                "Total Peak (Jan)": int(total_pk)
+            })
+            
+            table_cum.append({
+                "Year": y, 
+                "Baseline Organic Avg": round(grown_base_av, 1),
+                "New Projects Avg": round(cum_new_av, 1), 
+                "Total Avg Daily": round(total_av, 1), 
+                "Total Peak (Jan)": round(total_pk, 1)
+            })
+            
+            if y == end_y:
+                final_av = total_av
+                final_pk = total_pk
+
+        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(final_pk, 0), "avg_daily": round(final_av, 0), "annual_demand": round(final_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart, "table_b_individual": indiv_proj, "table_b_cum": table_cum})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
