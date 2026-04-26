@@ -8,7 +8,7 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. V6.1 (ORGANIC GROWTH ENGINE)."
+    return "NEXUS BRAIN IS ONLINE. V7.0 (PREDICTIVE TREND ENGINE)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
@@ -89,7 +89,7 @@ def simulate():
         return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data, "table_a_results": table_a_results})
 
     # ==========================================
-    # METHOD B: DYNAMIC INFERENCE + ORGANIC GROWTH
+    # METHOD B: PREDICTIVE TREND + ORGANIC GROWTH
     # ==========================================
     elif sim_method == 'B':
         w_weights = {
@@ -99,7 +99,23 @@ def simulate():
             'Pr Pool': float(incoming_data.get('w_pr_pool', 3.0))
         }
         
-        b_growth_rate = float(incoming_data.get('b_growth_rate', 1.5)) / 100.0
+        # Calculate Trend from Historical Array
+        historical = incoming_data.get('historical_data', [])
+        b_growth_rate = 0.015 # default 1.5% fallback
+        
+        if len(historical) >= 2:
+            try:
+                # Sort by year to ensure correct trend
+                hist_sorted = sorted(historical, key=lambda x: int(x.get('Year', 0)))
+                start_vol = float(hist_sorted[0].get('Volume', 0))
+                end_vol = float(hist_sorted[-1].get('Volume', 0))
+                years_diff = int(hist_sorted[-1].get('Year')) - int(hist_sorted[0].get('Year'))
+                
+                # Compound Annual Growth Rate (CAGR) Formula
+                if start_vol > 0 and years_diff > 0:
+                    b_growth_rate = (end_vol / start_vol) ** (1 / years_diff) - 1
+            except:
+                pass
         
         matrix_baseline = incoming_data.get('matrix_b_baseline', [])
         matrix_future = incoming_data.get('matrix_b_future', [])
@@ -161,7 +177,7 @@ def simulate():
             else:
                 type_chart.append({"year": str(y), "Condo": 0, "Villa": 0})
             
-            # Organic Growth applied to Baseline properties
+            # Predictive Organic Growth applied to Baseline properties
             grown_base_av = base_total_av * ((1 + b_growth_rate) ** (y - start_y))
             grown_base_pk = base_total_pk * ((1 + b_growth_rate) ** (y - start_y))
             
@@ -187,7 +203,18 @@ def simulate():
                 final_av = total_av
                 final_pk = total_pk
 
-        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(final_pk, 0), "avg_daily": round(final_av, 0), "annual_demand": round(final_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart, "table_b_individual": indiv_proj, "table_b_cum": table_cum})
+        return jsonify({
+            "status": "success", 
+            "method_used": "B", 
+            "peak_demand": round(final_pk, 0), 
+            "avg_daily": round(final_av, 0), 
+            "annual_demand": round(final_av*365, 0), 
+            "calculated_cagr": round(b_growth_rate * 100, 2), # Send calculated rate back to UI
+            "cum_chart": cum_chart, 
+            "type_chart": type_chart, 
+            "table_b_individual": indiv_proj, 
+            "table_b_cum": table_cum
+        })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
