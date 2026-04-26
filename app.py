@@ -1,13 +1,14 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
+import math
 
 app = Flask(__name__)
 CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. V4.0 (1:1 PYTHON PARITY SYNC)."
+    return "NEXUS BRAIN IS ONLINE. V5.0 (FINAL SYNC - DYNAMIC MATRICES)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
@@ -33,27 +34,30 @@ def simulate():
         pk_occ, av_occ = float(incoming_data.get('peak_occ', 90))/100.0, float(incoming_data.get('avg_occ', 65))/100.0
         irr_mult, g_rate, nrw = float(incoming_data.get('irr_peak_mult', 1.5)), float(incoming_data.get('growth_rate', 3.5))/100.0, float(incoming_data.get('nrw_loss', 10.0))/100.0
 
-        # Exact Method A Projects from Python
-        projects_a = [
-            {'Year': 2026, 'Project Name': 'Skypark 2', 'Category': 'Non-Hotel', 'Type': '1BR', 'Count': 236},
-            {'Year': 2026, 'Project Name': 'Banyan Tree Oceanfront', 'Category': 'Hotel', 'Type': 'Villa', 'Count': 6},
-            {'Year': 2027, 'Project Name': 'Lakeland Waterfront', 'Category': 'Non-Hotel', 'Type': '2BR', 'Count': 47},
-            {'Year': 2030, 'Project Name': 'Laguna Golf Residences', 'Category': 'Non-Hotel', 'Type': '1BR', 'Count': 139},
-        ]
+        # FETCH DYNAMIC TABLE FROM FRONTEND
+        projects_a = incoming_data.get('matrix_a', [])
         
-        start_year, end_year = 2026, 2036
+        if not projects_a:
+            return jsonify({"status": "error", "message": "No project data provided."})
+
+        # Find timeline range safely
+        years = [int(p.get('Year', 2026)) for p in projects_a]
+        start_year = min(years) if years else 2026
+        end_year = max(years) + 10 if years else 2036
+        
         chart_consumption = []
         bd_dom, bd_fnb, bd_stf, bd_irr, bd_pol = 0, 0, 0, 0, 0
         final_peak, final_avg, final_ann = 0, 0, 0
 
         # Run multi-year cumulative engine
         for y in range(start_year, end_year + 1):
-            active = [p for p in projects_a if p['Year'] <= y]
+            active = [p for p in projects_a if int(p.get('Year', 2026)) <= y]
             s_dom_pk, s_fnb_pk, s_dom_av, s_fnb_av, s_stf, s_irr, s_pol = 0,0,0,0,0,0,0
             
             for p in active:
-                count, is_hotel = p['Count'], p['Category'] == 'Hotel'
-                pax = count * {'1BR': 2, '2BR': 4, '3BR': 5, '4BR': 6, '5BR': 8, 'Villa': 6}.get(p['Type'], 2)
+                count = int(p.get('Count', 0))
+                is_hotel = p.get('Category', 'Non-Hotel') == 'Hotel'
+                pax = count * {'1BR': 2, '2BR': 4, '3BR': 5, '4BR': 6, '5BR': 8, 'Villa': 6}.get(p.get('Type', '1BR'), 2)
                 stf_count = count * (r_hot if is_hotel else r_non)
                 
                 dom = pax * ((h_sh + h_tl + h_ms + h_ln) if is_hotel else (n_sh + n_tl + n_ms + n_ln))
@@ -84,7 +88,7 @@ def simulate():
             {"category": "Staff/Cooling", "value": round(bd_stf, 1)}, {"category": "Pools", "value": round(bd_pol, 1)}, {"category": "Irrigation", "value": round(bd_irr, 1)}
         ]
 
-        return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data, "matrix_data": projects_a})
+        return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data})
 
     # ==========================================
     # METHOD B: DYNAMIC INFERENCE + FUTURE CUMULATIVE
@@ -97,7 +101,7 @@ def simulate():
             'Pr_Pool': float(incoming_data.get('w_pr_pool', 3.0))
         }
         
-        # 1. Dynamic Inference from 25 Existing Properties
+        # 1. Dynamic Inference from 25 Existing Properties (Internal Baseline)
         baselines = [
             {"Type": "Villa", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":24,"Sh_Pool":0,"Pr_Pool":0,"Ann":14865,"Pk":1743},
             {"Type": "Condo", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":193,"Sh_Pool":0,"Pr_Pool":0,"Ann":16372,"Pk":2210},
@@ -105,12 +109,12 @@ def simulate():
             {"Type": "Condo", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":416,"Sh_Pool":0,"Pr_Pool":0,"Ann":28017,"Pk":4047},
             {"Type": "Villa", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":56,"Sh_Pool":0,"Pr_Pool":0,"Ann":51827,"Pk":6552},
             {"Type": "Villa", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":36,"Sh_Pool":0,"Pr_Pool":0,"Ann":36782,"Pk":4409}
-        ] # (Truncated internal list to represent the engine math for speed)
+        ] 
         
         def get_rates(b_type):
             av, pk = [], []
             for b in [x for x in baselines if x["Type"] == b_type]:
-                eq = sum(b[k]*w_weights[k] for k in w_weights.keys())
+                eq = sum(b[k]*w_weights[k] for k in w_weights.keys() if k in b)
                 if eq > 0:
                     av.append((b["Ann"]/eq)/365)
                     pk.append((b["Pk"]/eq)/31)
@@ -119,26 +123,24 @@ def simulate():
         c_av, c_pk = get_rates("Condo")
         v_av, v_pk = get_rates("Villa")
 
-        # 2. Apply to Future 2026-2050
-        future = [
-            {"Year": 2026, "Project Name": "Skypark 2", "Type": "Condo", "1-Bed": 0, "2-Bed": 0, "3-Bed": 0, "4+ Bed": 0, "Unspec": 398, "Shared Pools": 0, "Private Pools": 0},
-            {"Year": 2027, "Project Name": "Lakeland Waterfront", "Type": "Condo", "1-Bed": 0, "2-Bed": 0, "3-Bed": 0, "4+ Bed": 0, "Unspec": 327, "Shared Pools": 0, "Private Pools": 0},
-            {"Year": 2028, "Project Name": "Bayside", "Type": "Condo", "1-Bed": 0, "2-Bed": 0, "3-Bed": 0, "4+ Bed": 0, "Unspec": 237, "Shared Pools": 0, "Private Pools": 0},
-            {"Year": 2029, "Project Name": "Garrya Residences", "Type": "Condo", "1-Bed": 0, "2-Bed": 0, "3-Bed": 0, "4+ Bed": 0, "Unspec": 179, "Shared Pools": 0, "Private Pools": 0},
-            {"Year": 2030, "Project Name": "Lotus Lake Condo", "Type": "Condo", "1-Bed": 0, "2-Bed": 0, "3-Bed": 0, "4+ Bed": 0, "Unspec": 319, "Shared Pools": 0, "Private Pools": 0}
-        ]
-        for y in range(2031, 2041):
-            future.append({"Year": y, "Project Name": "Future Masterplan", "Type": "Condo", "1-Bed": 0, "2-Bed": 0, "3-Bed": 0, "4+ Bed": 0, "Unspec": 200, "Shared Pools": 0, "Private Pools": 0})
+        # 2. Apply to Future Custom Matrix from UI
+        future = incoming_data.get('matrix_b', [])
         
         y_data = {}
         for p in future:
-            eq = (p['1-Bed']*w_weights['1-Bed']) + (p['2-Bed']*w_weights['2-Bed']) + (p['3-Bed']*w_weights['3-Bed']) + (p['4+ Bed']*w_weights['4+ Bed']) + (p['Unspec']*w_weights['Unspec']) + (p['Shared Pools']*w_weights['Sh_Pool']) + (p['Private Pools']*w_weights['Pr_Pool'])
-            p_av, p_pk = eq * (c_av if p['Type']=="Condo" else v_av), eq * (c_pk if p['Type']=="Condo" else v_pk)
+            # Safely get values
+            u_1b, u_2b, u_3b, u_4b = int(p.get('1-Bed',0)), int(p.get('2-Bed',0)), int(p.get('3-Bed',0)), int(p.get('4+ Bed',0))
+            u_uns, p_sh, p_pr = int(p.get('Unspec',0)), int(p.get('Sh Pool',0)), int(p.get('Pr Pool',0))
             
-            y = p['Year']
+            eq = (u_1b*w_weights['1-Bed']) + (u_2b*w_weights['2-Bed']) + (u_3b*w_weights['3-Bed']) + (u_4b*w_weights['4+ Bed']) + (u_uns*w_weights['Unspec']) + (p_sh*w_weights['Sh_Pool']) + (p_pr*w_weights['Pr_Pool'])
+            
+            p_av = eq * (c_av if p.get('Type')=="Condo" else v_av)
+            p_pk = eq * (c_pk if p.get('Type')=="Condo" else v_pk)
+            
+            y = int(p.get('Year', 2026))
             if y not in y_data: y_data[y] = {"av": 0, "pk": 0, "c_av": 0, "v_av": 0}
             y_data[y]["av"] += p_av; y_data[y]["pk"] += p_pk
-            if p['Type'] == 'Condo': y_data[y]["c_av"] += p_av 
+            if p.get('Type') == 'Condo': y_data[y]["c_av"] += p_av 
             else: y_data[y]["v_av"] += p_av
                 
         cum_chart, type_chart = [], []
@@ -148,7 +150,7 @@ def simulate():
             cum_chart.append({"year": str(y), "New Avg": int(cum_av), "New Peak": int(cum_pk)})
             type_chart.append({"year": str(y), "Condo": int(y_data[y]["c_av"]), "Villa": int(y_data[y]["v_av"])})
 
-        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(cum_pk, 0), "avg_daily": round(cum_av, 0), "annual_demand": round(cum_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart, "matrix_data": future})
+        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(cum_pk, 0), "avg_daily": round(cum_av, 0), "annual_demand": round(cum_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
