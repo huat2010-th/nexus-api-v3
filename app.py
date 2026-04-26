@@ -7,7 +7,7 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. RUNNING V3.2 (PHASE 2 - MASTER SIDEBAR)."
+    return "NEXUS BRAIN IS ONLINE. RUNNING V3.3 (FINAL DEEP SYNC)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
@@ -20,10 +20,9 @@ def simulate():
     breakdown_data = []
     
     # ==========================================
-    # METHOD A MATH (Granular Component Logic)
+    # METHOD A MATH
     # ==========================================
     if sim_method == 'A':
-        # Hotel Parameters
         h_sh = float(incoming_data.get('h_shower', 120))
         h_tl = float(incoming_data.get('h_toilet', 45))
         h_ms = float(incoming_data.get('h_misc', 40))
@@ -33,7 +32,6 @@ def simulate():
         h_pe = float(incoming_data.get('h_pool_evap', 10))
         h_pbw = float(incoming_data.get('h_pool_bw', 5))
 
-        # Non-Hotel Parameters
         n_sh = float(incoming_data.get('n_shower', 90))
         n_tl = float(incoming_data.get('n_toilet', 40))
         n_ms = float(incoming_data.get('n_misc', 30))
@@ -43,7 +41,6 @@ def simulate():
         n_pe = float(incoming_data.get('n_pool_evap', 10))
         n_pbw = float(incoming_data.get('n_pool_bw', 5))
 
-        # Global Engineering Parameters
         b_cool = float(incoming_data.get('b_cooling', 2.0))
         b_irr = float(incoming_data.get('b_irrigation', 5.0))
         b_stf = float(incoming_data.get('b_staff', 100.0))
@@ -53,7 +50,6 @@ def simulate():
         i_lnd = float(incoming_data.get('inf_land', 20.0))
         i_gfa = float(incoming_data.get('inf_gfa', 120.0))
 
-        # Scenarios
         pk_occ = float(incoming_data.get('peak_occ', 90)) / 100.0
         av_occ = float(incoming_data.get('avg_occ', 65)) / 100.0
         irr_mult = float(incoming_data.get('irr_peak_mult', 1.5))
@@ -88,14 +84,11 @@ def simulate():
             stf_vol = (stf_count * b_stf) + (count * i_gfa * b_cool)
             irr_vol = count * i_lnd * b_irr
             
-            # Add to Annual Averages
             sum_dom_avg += (dom * av_occ)
             sum_fnb_avg += (fnb * av_occ)
             sum_stf += stf_vol
             sum_irr += irr_vol
             sum_pol += pol
-            
-            # Add to Peak Day
             sum_dom_pk += dom
             sum_fnb_pk += fnb
             
@@ -119,14 +112,36 @@ def simulate():
         ]
 
     # ==========================================
-    # METHOD B MATH
+    # METHOD B MATH (Smart Inference Weights)
     # ==========================================
     elif sim_method == 'B':
-        units = float(incoming_data.get('units', 120))
-        pools = float(incoming_data.get('pools', 8))
+        # Counts
+        c_1bed = float(incoming_data.get('c_1bed', 0))
+        c_2bed = float(incoming_data.get('c_2bed', 0))
+        c_3bed = float(incoming_data.get('c_3bed', 0))
+        c_4bed = float(incoming_data.get('c_4bed', 0))
+        c_unspec = float(incoming_data.get('c_unspec', 120))
+        c_sh_pool = float(incoming_data.get('c_sh_pool', 8))
+        c_pr_pool = float(incoming_data.get('c_pr_pool', 0))
         
-        avg_daily = (units * 1.8) + (pools * 15.0)
-        peak_daily = (units * 2.2) + (pools * 20.0)
+        # Weights
+        w_1bed = float(incoming_data.get('w_1bed', 1.0))
+        w_2bed = float(incoming_data.get('w_2bed', 1.5))
+        w_3bed = float(incoming_data.get('w_3bed', 2.0))
+        w_4bed = float(incoming_data.get('w_4bed', 2.5))
+        w_unspec = float(incoming_data.get('w_unspec', 1.5))
+        w_sh_pool = float(incoming_data.get('w_sh_pool', 20.0))
+        w_pr_pool = float(incoming_data.get('w_pr_pool', 3.0))
+
+        # Calculate Total Equivalent Units
+        eq_units = (c_1bed * w_1bed) + (c_2bed * w_2bed) + (c_3bed * w_3bed) + (c_4bed * w_4bed) + (c_unspec * w_unspec)
+        eq_pools = (c_sh_pool * w_sh_pool) + (c_pr_pool * w_pr_pool)
+        total_eq = eq_units + eq_pools
+        
+        # Base Rates per Equivalent Unit (Derived from Laguna baselines)
+        avg_daily = total_eq * 1.8 
+        peak_daily = total_eq * 2.2
+        
         g_factor = (1 + 0.035) ** 4 
         n_factor = 1 + 0.10
         
@@ -135,10 +150,11 @@ def simulate():
         annual_m3_final = avg_daily_final * 365
 
         breakdown_data = [
-            {"category": "Housing Units", "value": round(((units * 1.8)/avg_daily) * 100, 1) if avg_daily else 0},
-            {"category": "Pool Equivalents", "value": round(((pools * 15.0)/avg_daily) * 100, 1) if avg_daily else 0}
+            {"category": "Housing Eq. Volume", "value": round((eq_units/total_eq)*100, 1) if total_eq else 0},
+            {"category": "Pool Eq. Volume", "value": round((eq_pools/total_eq)*100, 1) if total_eq else 0}
         ]
 
+    # Shared Chart Generation
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     chart_consumption = []
     for i, month in enumerate(months):
