@@ -7,7 +7,7 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. RUNNING V3.2 (WITH MATRIX)."
+    return "NEXUS BRAIN IS ONLINE. RUNNING V3.2 (PHASE 1 - DEEP SYNC)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
@@ -16,9 +16,10 @@ def simulate():
     
     peak_m3_final = 0
     annual_m3_final = 0
+    breakdown_data = []
     
     # ==========================================
-    # METHOD A MATH
+    # METHOD A MATH (With Component Breakdown)
     # ==========================================
     if sim_method == 'A':
         v_sh = float(incoming_data.get('shower', 120))
@@ -27,6 +28,14 @@ def simulate():
         v_ml = float(incoming_data.get('meals', 3.0))
         occ_rate = float(incoming_data.get('occupancy', 85)) / 100.0
         
+        # Base Engineering Params (We will make these sliders in Phase 2)
+        b_cooling = 2.0
+        b_irrigation = 5.0
+        b_staff = 100.0
+        inf_pool = 3.0
+        inf_land = 20.0
+        inf_gfa = 120.0
+
         projects = [
             {'Category': 'Non-Hotel', 'Type': '1BR', 'Count': 236},
             {'Category': 'Hotel', 'Type': 'Villa', 'Count': 6},
@@ -34,21 +43,43 @@ def simulate():
             {'Category': 'Non-Hotel', 'Type': '1BR', 'Count': 139}
         ]
         
-        sum_var, sum_fix = 0, 0
+        sum_dom, sum_fnb, sum_stf, sum_irr, sum_pol = 0, 0, 0, 0, 0
+        
         for p in projects:
             count = p['Count']
             is_hotel = p['Category'] == 'Hotel'
             pax = count * {'1BR': 2, '2BR': 4, '3BR': 5, '4BR': 6, 'Villa': 6}.get(p['Type'], 2)
+            total_staff = count * (1.2 if is_hotel else 0.2)
             
-            sum_var += (pax * (v_sh + v_tl + (40 if is_hotel else 30) + v_ln)) + (pax * v_ml * (25 if is_hotel else 20))
-            sum_fix += (count * (1.2 if is_hotel else 0.2) * 100) 
+            # Sub-calculations per component
+            dom = pax * (v_sh + v_tl + (40 if is_hotel else 30) + v_ln)
+            fnb = pax * v_ml * (25 if is_hotel else 20)
+            stf = (total_staff * b_staff) + (count * inf_gfa * b_cooling)
+            irr = count * inf_land * b_irrigation
+            pol = count * inf_pool * (10 + 5)
             
-        peak_m3 = ((sum_var * 0.90) + sum_fix) / 1000
-        annual_m3 = (((sum_var * occ_rate) + sum_fix) / 1000) * 365
-        growth_factor = (1 + 0.035) ** 4 
+            sum_dom += (dom * occ_rate)
+            sum_fnb += (fnb * occ_rate)
+            sum_stf += stf
+            sum_irr += irr
+            sum_pol += pol
+            
+        avg_daily_m3 = (sum_dom + sum_fnb + sum_stf + sum_irr + sum_pol) / 1000
+        peak_m3 = (((sum_dom + sum_fnb)/occ_rate * 0.90) + sum_stf + sum_pol + (sum_irr * 1.5)) / 1000
         
+        growth_factor = (1 + 0.035) ** 4 
         peak_m3_final = peak_m3 * growth_factor * 1.10
-        annual_m3_final = annual_m3 * growth_factor * 1.10
+        annual_m3_final = (avg_daily_m3 * 365) * growth_factor * 1.10
+
+        # Create percentage breakdown for the UI Chart
+        total_vol = sum_dom + sum_fnb + sum_stf + sum_irr + sum_pol
+        breakdown_data = [
+            {"category": "Domestic", "value": round(sum_dom/total_vol * 100, 1)},
+            {"category": "F&B / Dining", "value": round(sum_fnb/total_vol * 100, 1)},
+            {"category": "Staff & Cooling", "value": round(sum_stf/total_vol * 100, 1)},
+            {"category": "Pools", "value": round(sum_pol/total_vol * 100, 1)},
+            {"category": "Irrigation", "value": round(sum_irr/total_vol * 100, 1)}
+        ]
 
     # ==========================================
     # METHOD B MATH
@@ -64,30 +95,20 @@ def simulate():
         peak_m3_final = peak_daily * growth_factor * 1.10
         annual_m3_final = (avg_daily * 365) * growth_factor * 1.10
 
-    # ==========================================
-    # CHARTS GENERATOR
-    # ==========================================
-    avg_daily_m3 = annual_m3_final / 365
-    
+        breakdown_data = [
+            {"category": "Housing Units", "value": round(((units * 1.8)/avg_daily) * 100, 1)},
+            {"category": "Pool Equivalents", "value": round(((pools * 15.0)/avg_daily) * 100, 1)}
+        ]
+
+    # Shared Chart Logic
+    avg_daily_final = annual_m3_final / 365
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     chart_consumption = []
     for i, month in enumerate(months):
-        seasonality = 1 + (math.sin((i / 11) * math.pi) * ((peak_m3_final - avg_daily_m3) / avg_daily_m3))
-        demand_val = int(avg_daily_m3 * seasonality)
+        seasonality = 1 + (math.sin((i / 11) * math.pi) * ((peak_m3_final - avg_daily_final) / avg_daily_final))
+        demand_val = int(avg_daily_final * seasonality)
         chart_consumption.append({"month": month, "flow": int(demand_val * 1.08), "demand": demand_val})
 
-    q_base = annual_m3_final / 4
-    chart_distribution = [
-        {"sector": "Residential", "q1": int(q_base * 0.40), "q2": int(q_base * 0.42), "q3": int(q_base * 0.45), "q4": int(q_base * 0.41)},
-        {"sector": "Commercial", "q1": int(q_base * 0.25), "q2": int(q_base * 0.28), "q3": int(q_base * 0.30), "q4": int(q_base * 0.26)},
-        {"sector": "Industrial", "q1": int(q_base * 0.20), "q2": int(q_base * 0.21), "q3": int(q_base * 0.22), "q4": int(q_base * 0.20)},
-        {"sector": "Agriculture", "q1": int(q_base * 0.10), "q2": int(q_base * 0.15), "q3": int(q_base * 0.18), "q4": int(q_base * 0.11)},
-        {"sector": "Public", "q1": int(q_base * 0.05), "q2": int(q_base * 0.06), "q3": int(q_base * 0.07), "q4": int(q_base * 0.05)}
-    ]
-
-    # ==========================================
-    # MATRIX DATABASE (Real Laguna Projects)
-    # ==========================================
     matrix_data = [
         {"id": 1, "zone": "Skypark 2", "category": "Condo", "baseline": 236, "actual": 236, "variance": 0.0, "status": "Optimal"},
         {"id": 2, "zone": "Banyan Tree Oceanfront", "category": "Villa", "baseline": 6, "actual": 6, "variance": 0.0, "status": "Optimal"},
@@ -103,9 +124,10 @@ def simulate():
         "status": "success",
         "method_used": sim_method,
         "peak_demand": round(peak_m3_final, 0),
+        "avg_daily": round(avg_daily_final, 0),
         "annual_demand": round(annual_m3_final, 0),
         "chart_consumption": chart_consumption,
-        "chart_distribution": chart_distribution,
+        "breakdown": breakdown_data,
         "matrix_data": matrix_data
     })
 
