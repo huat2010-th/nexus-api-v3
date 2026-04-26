@@ -7,14 +7,13 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. RUNNING V3.2 MATH ENGINE (WITH LIVE CHARTS)."
+    return "NEXUS BRAIN IS ONLINE. RUNNING V3.2 (WITH MATRIX)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
     incoming_data = request.json
     sim_method = incoming_data.get('method', 'A')
     
-    # 1. Base Variables
     peak_m3_final = 0
     annual_m3_final = 0
     
@@ -66,30 +65,17 @@ def simulate():
         annual_m3_final = (avg_daily * 365) * growth_factor * 1.10
 
     # ==========================================
-    # CHART GENERATOR (The Magic)
+    # CHARTS GENERATOR
     # ==========================================
     avg_daily_m3 = annual_m3_final / 365
     
-    # 1. 12-Month Flow vs Demand Curve
-    # We use a sine wave to simulate the seasonal "Peak" in July/August
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     chart_consumption = []
-    
     for i, month in enumerate(months):
-        # Creates a bell curve peaking in month 6 (July)
         seasonality = 1 + (math.sin((i / 11) * math.pi) * ((peak_m3_final - avg_daily_m3) / avg_daily_m3))
-        
         demand_val = int(avg_daily_m3 * seasonality)
-        flow_val = int(demand_val * 1.08) # Flow is slightly higher than demand (NRW buffer)
-        
-        chart_consumption.append({
-            "month": month,
-            "flow": flow_val,
-            "demand": demand_val
-        })
+        chart_consumption.append({"month": month, "flow": int(demand_val * 1.08), "demand": demand_val})
 
-    # 2. Sector Distribution (Bar Chart)
-    # We slice the total annual demand into categories
     q_base = annual_m3_final / 4
     chart_distribution = [
         {"sector": "Residential", "q1": int(q_base * 0.40), "q2": int(q_base * 0.42), "q3": int(q_base * 0.45), "q4": int(q_base * 0.41)},
@@ -99,13 +85,28 @@ def simulate():
         {"sector": "Public", "q1": int(q_base * 0.05), "q2": int(q_base * 0.06), "q3": int(q_base * 0.07), "q4": int(q_base * 0.05)}
     ]
 
+    # ==========================================
+    # MATRIX DATABASE (Real Laguna Projects)
+    # ==========================================
+    matrix_data = [
+        {"id": 1, "zone": "Skypark 2", "category": "Condo", "baseline": 236, "actual": 236, "variance": 0.0, "status": "Optimal"},
+        {"id": 2, "zone": "Banyan Tree Oceanfront", "category": "Villa", "baseline": 6, "actual": 6, "variance": 0.0, "status": "Optimal"},
+        {"id": 3, "zone": "Lakeland Waterfront", "category": "Condo", "baseline": 47, "actual": 47, "variance": 0.0, "status": "Optimal"},
+        {"id": 4, "zone": "Laguna Golf Res.", "category": "Condo", "baseline": 139, "actual": 139, "variance": 0.0, "status": "Optimal"},
+        {"id": 5, "zone": "Laguna Fairway", "category": "Villa", "baseline": 24, "actual": 24, "variance": 0.0, "status": "Optimal"},
+        {"id": 6, "zone": "Cassia Residence", "category": "Condo", "baseline": 193, "actual": 193, "variance": 0.0, "status": "Optimal"},
+        {"id": 7, "zone": "Beachside", "category": "Condo", "baseline": 184, "actual": 184, "variance": 0.0, "status": "Optimal"},
+        {"id": 8, "zone": "Laguna Village (LVR)", "category": "Villa", "baseline": 95, "actual": 95, "variance": 0.0, "status": "Optimal"},
+    ]
+
     return jsonify({
         "status": "success",
         "method_used": sim_method,
         "peak_demand": round(peak_m3_final, 0),
         "annual_demand": round(annual_m3_final, 0),
         "chart_consumption": chart_consumption,
-        "chart_distribution": chart_distribution
+        "chart_distribution": chart_distribution,
+        "matrix_data": matrix_data
     })
 
 if __name__ == '__main__':
