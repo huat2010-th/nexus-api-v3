@@ -8,16 +8,13 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. V5.0 (FINAL SYNC - DYNAMIC MATRICES)."
+    return "NEXUS BRAIN IS ONLINE. V6.0 (TRUE PYTHON PARITY)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
     incoming_data = request.json
     sim_method = incoming_data.get('method', 'A')
     
-    # ==========================================
-    # METHOD A: TIME-SERIES COMPONENT MATH
-    # ==========================================
     if sim_method == 'A':
         h_sh, h_tl, h_ms, h_ln = float(incoming_data.get('h_shower', 120)), float(incoming_data.get('h_toilet', 45)), float(incoming_data.get('h_misc', 40)), float(incoming_data.get('h_laundry', 60))
         h_ml, h_wm = float(incoming_data.get('h_meals', 2.5)), float(incoming_data.get('h_water_meal', 25))
@@ -34,22 +31,16 @@ def simulate():
         pk_occ, av_occ = float(incoming_data.get('peak_occ', 90))/100.0, float(incoming_data.get('avg_occ', 65))/100.0
         irr_mult, g_rate, nrw = float(incoming_data.get('irr_peak_mult', 1.5)), float(incoming_data.get('growth_rate', 3.5))/100.0, float(incoming_data.get('nrw_loss', 10.0))/100.0
 
-        # FETCH DYNAMIC TABLE FROM FRONTEND
         projects_a = incoming_data.get('matrix_a', [])
-        
-        if not projects_a:
-            return jsonify({"status": "error", "message": "No project data provided."})
+        if not projects_a: return jsonify({"status": "error", "message": "No project data."})
 
-        # Find timeline range safely
         years = [int(p.get('Year', 2026)) for p in projects_a]
-        start_year = min(years) if years else 2026
-        end_year = max(years) + 10 if years else 2036
+        start_year, end_year = min(years) if years else 2026, (max(years) + 10 if years else 2036)
         
-        chart_consumption = []
+        chart_consumption, table_a_results = [], []
         bd_dom, bd_fnb, bd_stf, bd_irr, bd_pol = 0, 0, 0, 0, 0
         final_peak, final_avg, final_ann = 0, 0, 0
 
-        # Run multi-year cumulative engine
         for y in range(start_year, end_year + 1):
             active = [p for p in projects_a if int(p.get('Year', 2026)) <= y]
             s_dom_pk, s_fnb_pk, s_dom_av, s_fnb_av, s_stf, s_irr, s_pol = 0,0,0,0,0,0,0
@@ -77,62 +68,53 @@ def simulate():
             
             chart_consumption.append({"year": str(y), "Average": round(avg_m3,0), "Peak": round(peak_m3,0)})
             
+            bd_factor = (g_fac * n_fac) / 1000
+            table_a_results.append({
+                "Year": y, "Daily Peak (m3/day)": round(peak_m3, 2), "Daily Avg (m3/day)": round(avg_m3, 2),
+                "Annual Total (m3/year)": round(avg_m3 * 365, 0), "Domestic (Avg m3/d)": round(s_dom_av * bd_factor, 1),
+                "Irrigation (Avg m3/d)": round(s_irr * bd_factor, 1), "Pools (Avg m3/d)": round(s_pol * bd_factor, 1)
+            })
+            
             if y == end_year:
                 final_peak, final_avg, final_ann = peak_m3, avg_m3, avg_m3 * 365
                 total_vol = s_dom_av + s_fnb_av + s_stf + s_irr + s_pol
                 if total_vol > 0:
                     bd_dom, bd_fnb, bd_stf, bd_irr, bd_pol = (s_dom_av/total_vol)*100, (s_fnb_av/total_vol)*100, (s_stf/total_vol)*100, (s_irr/total_vol)*100, (s_pol/total_vol)*100
 
-        breakdown_data = [
-            {"category": "Domestic", "value": round(bd_dom, 1)}, {"category": "F&B / Dining", "value": round(bd_fnb, 1)},
-            {"category": "Staff/Cooling", "value": round(bd_stf, 1)}, {"category": "Pools", "value": round(bd_pol, 1)}, {"category": "Irrigation", "value": round(bd_irr, 1)}
-        ]
+        breakdown_data = [{"category": "Domestic", "value": round(bd_dom, 1)}, {"category": "F&B / Dining", "value": round(bd_fnb, 1)}, {"category": "Staff/Cooling", "value": round(bd_stf, 1)}, {"category": "Pools", "value": round(bd_pol, 1)}, {"category": "Irrigation", "value": round(bd_irr, 1)}]
 
-        return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data})
+        return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data, "table_a_results": table_a_results})
 
-    # ==========================================
-    # METHOD B: DYNAMIC INFERENCE + FUTURE CUMULATIVE
-    # ==========================================
     elif sim_method == 'B':
         w_weights = {
             '1-Bed': float(incoming_data.get('w_1bed', 1.0)), '2-Bed': float(incoming_data.get('w_2bed', 1.5)),
             '3-Bed': float(incoming_data.get('w_3bed', 2.0)), '4+ Bed': float(incoming_data.get('w_4bed', 2.5)),
-            'Unspec': float(incoming_data.get('w_unspec', 1.5)), 'Sh_Pool': float(incoming_data.get('w_sh_pool', 20.0)),
-            'Pr_Pool': float(incoming_data.get('w_pr_pool', 3.0))
+            'Unspec': float(incoming_data.get('w_unspec', 1.5)), 'Sh Pool': float(incoming_data.get('w_sh_pool', 20.0)),
+            'Pr Pool': float(incoming_data.get('w_pr_pool', 3.0))
         }
         
-        # 1. Dynamic Inference from 25 Existing Properties (Internal Baseline)
-        baselines = [
-            {"Type": "Villa", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":24,"Sh_Pool":0,"Pr_Pool":0,"Ann":14865,"Pk":1743},
-            {"Type": "Condo", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":193,"Sh_Pool":0,"Pr_Pool":0,"Ann":16372,"Pk":2210},
-            {"Type": "Condo", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":184,"Sh_Pool":0,"Pr_Pool":0,"Ann":16922,"Pk":1410},
-            {"Type": "Condo", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":416,"Sh_Pool":0,"Pr_Pool":0,"Ann":28017,"Pk":4047},
-            {"Type": "Villa", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":56,"Sh_Pool":0,"Pr_Pool":0,"Ann":51827,"Pk":6552},
-            {"Type": "Villa", "1-Bed":0,"2-Bed":0,"3-Bed":0,"4+ Bed":0,"Unspec":36,"Sh_Pool":0,"Pr_Pool":0,"Ann":36782,"Pk":4409}
-        ] 
+        matrix_baseline = incoming_data.get('matrix_b_baseline', [])
+        matrix_future = incoming_data.get('matrix_b_future', [])
         
         def get_rates(b_type):
             av, pk = [], []
-            for b in [x for x in baselines if x["Type"] == b_type]:
-                eq = sum(b[k]*w_weights[k] for k in w_weights.keys() if k in b)
+            for b in [x for x in matrix_baseline if x.get("Type") == b_type]:
+                eq = sum(float(b.get(k, 0))*w_weights[k] for k in w_weights.keys() if k in b)
                 if eq > 0:
-                    av.append((b["Ann"]/eq)/365)
-                    pk.append((b["Pk"]/eq)/31)
+                    av.append((float(b.get("Ann", 0))/eq)/365)
+                    pk.append((float(b.get("Pk", 0))/eq)/31)
             return np.mean(av) if av else 1.8, np.mean(pk) if pk else 2.2
             
         c_av, c_pk = get_rates("Condo")
         v_av, v_pk = get_rates("Villa")
 
-        # 2. Apply to Future Custom Matrix from UI
-        future = incoming_data.get('matrix_b', [])
-        
         y_data = {}
-        for p in future:
-            # Safely get values
-            u_1b, u_2b, u_3b, u_4b = int(p.get('1-Bed',0)), int(p.get('2-Bed',0)), int(p.get('3-Bed',0)), int(p.get('4+ Bed',0))
-            u_uns, p_sh, p_pr = int(p.get('Unspec',0)), int(p.get('Sh Pool',0)), int(p.get('Pr Pool',0))
+        indiv_proj = []
+        for p in matrix_future:
+            u_1b, u_2b, u_3b, u_4b = float(p.get('1-Bed',0)), float(p.get('2-Bed',0)), float(p.get('3-Bed',0)), float(p.get('4+ Bed',0))
+            u_uns, p_sh, p_pr = float(p.get('Unspec',0)), float(p.get('Sh Pool',0)), float(p.get('Pr Pool',0))
             
-            eq = (u_1b*w_weights['1-Bed']) + (u_2b*w_weights['2-Bed']) + (u_3b*w_weights['3-Bed']) + (u_4b*w_weights['4+ Bed']) + (u_uns*w_weights['Unspec']) + (p_sh*w_weights['Sh_Pool']) + (p_pr*w_weights['Pr_Pool'])
+            eq = (u_1b*w_weights['1-Bed']) + (u_2b*w_weights['2-Bed']) + (u_3b*w_weights['3-Bed']) + (u_4b*w_weights['4+ Bed']) + (u_uns*w_weights['Unspec']) + (p_sh*w_weights['Sh Pool']) + (p_pr*w_weights['Pr Pool'])
             
             p_av = eq * (c_av if p.get('Type')=="Condo" else v_av)
             p_pk = eq * (c_pk if p.get('Type')=="Condo" else v_pk)
@@ -142,15 +124,22 @@ def simulate():
             y_data[y]["av"] += p_av; y_data[y]["pk"] += p_pk
             if p.get('Type') == 'Condo': y_data[y]["c_av"] += p_av 
             else: y_data[y]["v_av"] += p_av
+            
+            indiv_proj.append({
+                "Year": y, "Project": p.get('Project Name', ''), "Type": p.get('Type', ''),
+                "Total Units": sum([u_1b, u_2b, u_3b, u_4b, u_uns]), "Avg Daily (m3/d)": round(p_av, 1),
+                "Peak Daily (m3/d)": round(p_pk, 1), "Ann Total (m3/y)": round(p_av*365, 0)
+            })
                 
-        cum_chart, type_chart = [], []
+        cum_chart, type_chart, table_cum = [], [], []
         cum_av, cum_pk = 0, 0
         for y in sorted(y_data.keys()):
             cum_av += y_data[y]["av"]; cum_pk += y_data[y]["pk"]
             cum_chart.append({"year": str(y), "New Avg": int(cum_av), "New Peak": int(cum_pk)})
             type_chart.append({"year": str(y), "Condo": int(y_data[y]["c_av"]), "Villa": int(y_data[y]["v_av"])})
+            table_cum.append({"Year": y, "Cum. Avg Daily (m3/d)": round(cum_av, 1), "Cum. Peak Daily (m3/d)": round(cum_pk, 1)})
 
-        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(cum_pk, 0), "avg_daily": round(cum_av, 0), "annual_demand": round(cum_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart})
+        return jsonify({"status": "success", "method_used": "B", "peak_demand": round(cum_pk, 0), "avg_daily": round(cum_av, 0), "annual_demand": round(cum_av*365, 0), "cum_chart": cum_chart, "type_chart": type_chart, "table_b_individual": indiv_proj, "table_b_cum": table_cum})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
