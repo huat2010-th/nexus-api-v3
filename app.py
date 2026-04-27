@@ -8,7 +8,7 @@ CORS(app)
 
 @app.route('/', methods=['GET'])
 def home():
-    return "NEXUS BRAIN IS ONLINE. V7.2 (INDEPENDENT PREDICTIVE ENGINE)."
+    return "NEXUS BRAIN IS ONLINE. V7.3 (CLEAN FUTURE CUMULATIVE ENGINE)."
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
@@ -89,7 +89,7 @@ def simulate():
         return jsonify({"status": "success", "method_used": "A", "peak_demand": round(final_peak, 0), "avg_daily": round(final_avg, 0), "annual_demand": round(final_ann, 0), "chart_consumption": chart_consumption, "breakdown": breakdown_data, "table_a_results": table_a_results})
 
     # ==========================================
-    # METHOD B: INDEPENDENT PREDICTIVE TREND 
+    # METHOD B: CLEAN FUTURE CUMULATIVE 
     # ==========================================
     elif sim_method == 'B':
         w_weights = {
@@ -101,7 +101,6 @@ def simulate():
         
         matrix_baseline = incoming_data.get('matrix_b_baseline', [])
         matrix_future = incoming_data.get('matrix_b_future', [])
-        historical = incoming_data.get('historical_data', [])
         
         # 1. Base Rates from Sample Properties
         def get_rates(b_type):
@@ -115,45 +114,21 @@ def simulate():
             
         c_av, c_pk = get_rates("Condo")
         v_av, v_pk = get_rates("Villa")
-        
-        inferred_peak_ratio = c_pk / c_av if c_av > 0 else 1.2
 
-        # 2. INDEPENDENT Linear Predictive Trend (Does not add to future projects)
-        base_total_av_daily = 0
-        base_total_pk_daily = 0
-        annual_vol_increase = 0
-        last_hist_year = 2025
-        
-        if len(historical) >= 2:
-            hist_sorted = sorted(historical, key=lambda x: int(x.get('Year', 0)))
-            start_vol = float(hist_sorted[0].get('Volume', 0))
-            end_vol = float(hist_sorted[-1].get('Volume', 0))
-            last_hist_year = int(hist_sorted[-1].get('Year'))
-            years_diff = last_hist_year - int(hist_sorted[0].get('Year'))
-            
-            # Daily starting baseline for predictions
-            base_total_av_daily = end_vol / 365
-            base_total_pk_daily = base_total_av_daily * inferred_peak_ratio
-            
-            if years_diff > 0:
-                annual_vol_increase = (end_vol - start_vol) / years_diff
-        else:
-            last_hist_year = 2025
-            base_ann = sum(float(b.get("Ann", 0)) for b in matrix_baseline)
-            base_total_av_daily = base_ann / 365
-            base_total_pk_daily = base_total_av_daily * inferred_peak_ratio
-
-        daily_increase_av = annual_vol_increase / 365
-        daily_increase_pk = daily_increase_av * inferred_peak_ratio
-
-        # 3. Calculate New Projects
+        # 2. Calculate New Projects
         matrix_future = sorted(matrix_future, key=lambda x: int(x.get('Year', 2026)))
         y_data = {}
         indiv_proj = []
         running_indiv_units = 0
         
+        # Pre-calc yearly units added
+        yearly_units = {}
         for p in matrix_future:
-            # Force strict integer conversion so Javascript strings don't concatenate
+            y = int(p.get('Year', 2026))
+            units = sum([float(p.get('1-Bed',0)), float(p.get('2-Bed',0)), float(p.get('3-Bed',0)), float(p.get('4+ Bed',0)), float(p.get('Unspec',0))])
+            yearly_units[y] = yearly_units.get(y, 0) + units
+            
+        for p in matrix_future:
             u_1b = int(float(p.get('1-Bed',0)))
             u_2b = int(float(p.get('2-Bed',0)))
             u_3b = int(float(p.get('3-Bed',0)))
@@ -187,7 +162,7 @@ def simulate():
                 "Ann Total (m3/y)": round(p_av*365, 0)
             })
                 
-        # 4. Build Output Timeline (Separating the Trend from the New Projects)
+        # 3. Build Output Timeline (New Projects Only)
         years = [int(p.get('Year', 2026)) for p in matrix_future]
         start_y = min(years) if years else 2026
         end_y = max(years) if years else 2050
@@ -197,43 +172,31 @@ def simulate():
         cum_new_av, cum_new_pk, running_total_units = 0, 0, 0
         
         for y in range(start_y, end_y + 1):
+            running_total_units += yearly_units.get(y, 0)
+            
             if y in y_data:
                 cum_new_av += y_data[y]["new_av"]
                 cum_new_pk += y_data[y]["new_pk"]
-                running_total_units += y_data[y]["units_this_year"]
                 type_chart.append({"year": str(y), "Condo": int(y_data[y]["c_av"]), "Villa": int(y_data[y]["v_av"])})
             else:
                 type_chart.append({"year": str(y), "Condo": 0, "Villa": 0})
             
-            # Pure Independent Predictive Trend
-            years_past = max(0, y - last_hist_year)
-            pred_av = base_total_av_daily + (daily_increase_av * years_past)
-            pred_pk = base_total_pk_daily + (daily_increase_pk * years_past)
-            
             cum_chart.append({
                 "year": str(y), 
-                "Predictive Trend (Avg)": int(pred_av),
-                "Predictive Trend (Peak)": int(pred_pk),
-                "New Projects (Avg)": int(cum_new_av),
-                "New Projects (Peak)": int(cum_new_pk)
+                "New Peak": int(cum_new_pk),
+                "New Avg": int(cum_new_av)
             })
             
             table_cum.append({
                 "Year": y, 
                 "Cum. Units Added": running_total_units,
-                "Predictive Trend Avg": round(pred_av, 1),
-                "Predictive Trend Peak": round(pred_pk, 1),
-                "New Projects Avg": round(cum_new_av, 1), 
-                "New Projects Peak": round(cum_new_pk, 1)
+                "Cum. Avg Daily (m3/d)": round(cum_new_av, 1), 
+                "Cum. Peak Daily (m3/d)": round(cum_new_pk, 1)
             })
 
-        trend_str = f"+{round(annual_vol_increase,0)} m³/yr" if annual_vol_increase > 0 else "0 m³/yr"
-
-        # KPIs return ONLY the new future project demand to match your original Python code
         return jsonify({
             "status": "success", "method_used": "B", 
             "peak_demand": round(cum_new_pk, 0), "avg_daily": round(cum_new_av, 0), "annual_demand": round(cum_new_av*365, 0), 
-            "calculated_cagr": trend_str, 
             "cum_chart": cum_chart, "type_chart": type_chart, "table_b_individual": indiv_proj, "table_b_cum": table_cum
         })
 
